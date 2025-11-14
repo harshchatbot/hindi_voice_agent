@@ -16,7 +16,7 @@ model = WhisperModel("tiny", device="cpu")
 client = Groq(api_key=api_key)
 
 SAMPLE_RATE = 16000
-BLOCK_DURATION = 1.0  # 1 second chunk recording
+BLOCK_DURATION = 2.0  # 1 second chunk recording
 
 def record_block():
     duration = BLOCK_DURATION
@@ -33,7 +33,8 @@ def main():
         data = record_block()
         audio = data.flatten().astype(np.int16)
 
-        segments, _ = model.transcribe(audio)
+        segments, _ = model.transcribe(audio, beam_size=1, language="hi")
+
         text = "".join([seg.text for seg in segments]).strip()
 
         if not text:
@@ -41,8 +42,13 @@ def main():
 
         print("🗣 You:", text)
 
-        if text.lower() in ["stop", "exit", "bye"]:
-            print("👋 Ending...")
+        stop_words = ["stop", "stap", "exit", "exiit", "bye", "band", "band karo"]
+
+        segments, _ = model.transcribe(audio, language="hi")
+        text = "".join([seg.text for seg in segments]).strip()
+
+        if any(word in text.lower() for word in stop_words):
+            print("👋 Ending call...")
             break
 
         response = client.chat.completions.create(
