@@ -1,0 +1,51 @@
+# --- Python ---
+venv/
+.env
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+*.egg
+
+# --- Mac OS system files ---
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --- VS Code ---
+.vscode/
+.settings/
+*.code-workspace
+
+# --- Logs ---
+*.log
+logs/
+nohup.out
+
+# --- Audio temp files ---
+*.wav
+*.mp3
+input.wav
+response.mp3
+
+# --- Model cache (Whisper / Torch / HuggingFace) ---
+/root/.cache/
+/root/.whisper/
+/home/*/.cache/
+/Users/*/.cache/
+.cache/
+whisper-cache/
+transformers_cache/
+torch_cache/
+
+# --- Build files ---
+build/
+dist/
+*.spec
+
+# --- Python virtual environment ---
+venv/
+.env/
+.env.bak/
