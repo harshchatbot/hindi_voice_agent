@@ -1,0 +1,6 @@
+sounddevice
+scipy
+pydub
+gtts
+groq
+git+https://github.com/openai/whisper.git
