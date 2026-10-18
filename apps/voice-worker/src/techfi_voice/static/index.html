@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>TechFi Labs — Voice AI Playground</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/client.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="TechFi Labs home"><span class="brand-mark" aria-hidden="true">T<span>f</span></span>TechFi Labs<span class="brand-divider" aria-hidden="true"></span><span class="brand-product">Voice AI</span></a>
+    <span class="local-badge"><span aria-hidden="true"></span>Local playground</span>
+  </header>
+  <main>
+    <section class="intro" aria-labelledby="page-title">
+      <p class="eyebrow">REAL-TIME CONVERSATIONS</p>
+      <h1 id="page-title">Voice AI Playground<span class="title-dot">.</span></h1>
+      <p class="intro-copy">A natural conversation, in Hindi or Hinglish.<br>Choose a voice, connect your microphone, and say namaste.</p>
+    </section>
+    <section class="playground" aria-label="Voice conversation controls">
+      <div class="panel-header"><div><p class="eyebrow">YOUR SESSION</p><h2>Let’s talk.</h2></div>
+        <span id="status-badge" class="status-badge" data-state="ready"><span aria-hidden="true"></span><span id="status-label">Ready</span></span>
+      </div>
+      <div class="voice-field">
+        <label for="voice-provider">Voice provider</label>
+        <div class="select-wrap"><select id="voice-provider" aria-describedby="voice-help">
+          <option value="sarvam" selected>Sarvam Bulbul V3 — Shubh</option>
+          <option value="google">Google Chirp 3 HD — Achird</option>
+        </select></div>
+        <p id="voice-help" class="field-help">Choose before connecting. Your voice stays fixed for this session.</p>
+      </div>
+      <div class="conversation-stage" aria-label="Local audio activity">
+        <div class="voice-orb" id="voice-orb" aria-hidden="true"><span class="orb-ring"></span><span class="orb-core"><svg viewBox="0 0 48 48" fill="none"><path d="M12 21v6m6-14v22m6-28v34m6-26v18m6-12v6" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></span></div>
+        <p class="stage-title" id="stage-title">Your next conversation starts here</p>
+        <p id="status" class="status-message" role="status" aria-live="polite" aria-atomic="true">Ready. Microphone access begins when you press Start.</p>
+        <div class="activity-row" aria-hidden="true">
+          <div class="activity-channel"><span>YOUR MIC</span><div class="meter" id="mic-meter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+          <span class="activity-divider"></span>
+          <div class="activity-channel"><span>ASSISTANT</span><div class="meter" id="speaker-meter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+        </div>
+        <p id="activity-help" class="activity-help">Audio activity appears here when connected.</p>
+      </div>
+      <div class="actions">
+        <button id="start" class="button button-start"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4m-3 0h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Start Conversation</button>
+        <button id="stop" class="button button-stop" disabled><span class="stop-icon" aria-hidden="true"></span>End Conversation</button>
+      </div>
+      <div class="playback"><label for="speaker">Assistant playback</label><audio id="speaker" autoplay controls aria-label="Assistant audio playback"></audio><p id="playback-help">Use headphones. If playback is blocked, press Play above.</p></div>
+    </section>
+    <aside class="privacy-note" aria-label="Privacy and AI disclosure"><span class="privacy-icon" aria-hidden="true">i</span><div><strong>You’re speaking with an AI assistant.</strong><p>This local demo cannot verify your identity or access loan details. Do not share account numbers, OTPs, PINs or other sensitive information. Say “band karo” or press End Conversation to stop.</p></div></aside>
+    <footer>Built by TechFi Labs <span aria-hidden="true">·</span> Hindi &amp; Hinglish <span aria-hidden="true">·</span> Local audio testing</footer>
+  </main>
+</body>
+</html>

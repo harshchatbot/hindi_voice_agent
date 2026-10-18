@@ -49,3 +49,17 @@ dist/
 venv/
 .env/
 .env.bak/
+
+# Monorepo tooling and secret variants
+.venv/
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Keep any local Google credential mounts out of source control.
+credentials/
+secrets/
+*service-account*.json
+application_default_credentials.json

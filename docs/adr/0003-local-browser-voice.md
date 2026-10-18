@@ -1,0 +1,13 @@
+# ADR 0003: Local WebRTC and the milestone 2 provider stack
+
+Status: accepted for milestone 2. Extends ADRs 0001–0002; the original POC remains untouched.
+
+Use Pipecat 1.12.0's supported SarvamSTTService (SDK-backed streaming WebSocket), OpenAILLMService (streamed Chat Completions) and SarvamTTSService (interruptible streaming WebSocket). Configure supported models/voice and credentials explicitly. Extend the existing service factory rather than adding competing provider abstractions. A narrow OpenAI client-factory override configures HTTP timeout, no retries and explicit client close. Retain the earlier adapters for switching.
+
+Use SmallWebRTCConnection and SmallWebRTCTransport in a worker-owned loopback FastAPI development app. Negotiate non-trickle SDP once per session; use native browser audio and data-channel keepalives. A minimal static Start/Stop client is packaged with the worker; apps/web stays reserved. No external CDN, frontend framework, PortAudio, STUN/TURN or production signaling protocol is required. The HTTP control plane remains deployable without Pipecat. Restrict accepted Host/Origin and mutation headers; this is not public authentication.
+
+Local Silero VAD plus explicit speech-timeout turn strategies drive turns and interruption. Disable Sarvam server VAD and automatic turn-strategy substitution by supplying our strategy list. Input is 16 kHz mono, TTS/output 24 kHz. Use per-session processor instances and context, with provider-progress observation that never stores content. The runtime owns cancellation, maximum duration, idle/error outcomes, graceful EndFrame, bounded teardown and memory-history clearing. The server owns connection closure, admission limits and shutdown of active jobs.
+
+The approved prompt discloses AI status, requires verified identity before loan details, and prohibits secrets, coercion and third-party disclosure. No identity or customer-data service exists, so identity remains unverified and no actual loan details are available to the LLM. Explicit opt-out phrases are consumed before the LLM, interrupt current speech, trigger a fixed acknowledgment and bounded session end. This is local opt-out, not durable consent/DND enforcement. Prompt instructions and limited phrase matching are not a complete compliance mechanism.
+
+Consequences: no remote calling, tenant auth, campaigns, persistence or payment actions. Live microphone testing and provider credential/model/voice validation remain distinct from mocked tests and synthetic SDP negotiation. Future public transport work must first enforce authorization/consent/DND, verified identity and durable auditing boundaries defined in ADR 0002.

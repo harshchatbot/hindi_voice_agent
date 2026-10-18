@@ -1,0 +1,13 @@
+.git
+.venv
+.env
+.env.*
+**/__pycache__
+.pytest_cache
+.ruff_cache
+legacy
+tests
+credentials
+secrets
+**/*service-account*.json
+**/application_default_credentials.json
