@@ -31,6 +31,7 @@ class SessionMonitor(BaseObserver):
         *,
         require_finalized_transcripts: bool = False,
         on_stt_timeout: Callable[[], Awaitable[None]] | None = None,
+        external_stt_deadline: bool = False,
     ):
         super().__init__(observe_every_push=False)
         self.timeout = timeout
@@ -38,6 +39,7 @@ class SessionMonitor(BaseObserver):
         self.bot_stopped = bot_stopped
         self.require_finalized_transcripts = require_finalized_transcripts
         self.on_stt_timeout = on_stt_timeout
+        self.external_stt_deadline = external_stt_deadline
         self._timers: dict[str, asyncio.Task] = {}
 
     def cancel_timer(self, stage: str):
@@ -64,7 +66,8 @@ class SessionMonitor(BaseObserver):
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             self.cancel_timer("stt")
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            self.arm("stt")
+            if not self.external_stt_deadline:
+                self.arm("stt")
         elif isinstance(frame, TranscriptionFrame) and (
             not self.require_finalized_transcripts or frame.finalized
         ):

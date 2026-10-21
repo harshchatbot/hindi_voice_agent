@@ -4,8 +4,10 @@ from google.auth import load_credentials_from_file
 from google.cloud import texttospeech_v1
 from pipecat.services.google.tts import GoogleTTSService
 
+from techfi_voice.integrations.timing import TimedTTSMixin
 
-class ConfiguredGoogleTTSService(GoogleTTSService):
+
+class ConfiguredGoogleTTSService(TimedTTSMixin, GoogleTTSService):
     def _create_client(self, credentials, credentials_path):
         # Pydantic reads .env without changing os.environ. Load its optional ADC path
         # explicitly, supporting service accounts and other Google ADC file types.

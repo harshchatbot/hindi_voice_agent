@@ -21,10 +21,12 @@ def main() -> None:
         development = StartupSettings().environment == "development"
         import uvicorn
 
+        from techfi_voice.integrations.providers import session_profile
         from techfi_voice.server import create_app
 
         settings = VoiceSettings()
         app = create_app(settings)
+        logger.info(Event.WORKER_CONFIGURATION, extra=session_profile(settings))
         if args.check_config:
             return
         uvicorn.run(

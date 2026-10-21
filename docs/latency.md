@@ -1,57 +1,223 @@
-# Voice latency instrumentation
+# Voice latency investigation and instrumentation
 
-The worker reports content-free `voice_latency` JSON events automatically. No extra provider request, recording, audio export, transcript forwarding or remote metrics backend is added. `worker_started`, `worker_completed` and `worker_failed` from the session runtime include the same opaque `session_id`.
+This change is validated offline against **Pipecat 1.12.0**. No provider request
+or live audio test was performed. No latency improvement is claimed until the
+new traces have been compared during manual testing.
 
-A synthetic example:
+## Confirmed event flow and waits
+
+Local Silero VAD broadcasts a speech stop after `TECHFI_VAD_STOP_SECONDS`
+(default **0.4 seconds**) of silence. The upstream copy reaches Sarvam Realtime
+STT. Its supported manual-endpointing implementation flushes the remaining
+PCM audio before sending `speech_end`. It does **not** wait for the aggregator's
+turn-stop decision, and no extra provider `flush` event is needed. Sending
+`speech_end` only after a final-dependent turn stop would create a circular wait.
+
+`SpeechTimeoutUserTurnStopStrategy` starts two independent waits at VAD stop:
+its policy floor (`TECHFI_TURN_SILENCE_SECONDS`, default **0.6 seconds**) and an
+STT metadata safety timer. A finalized transcript short-circuits the STT timer,
+but not the policy floor. Thus, approximately:
+
+```text
+LLM readiness = VAD stop + max(policy floor, time until accepted STT final)
+```
+
+The 0.4-second VAD silence is before those waits; the 0.6-second policy and STT
+finalization are **overlapping**, not sequential. If STT is slower than the policy,
+removing the policy won't fix the STT outlier. If STT is fast, the policy can
+add a measurable gap, but it deliberately protects pauses within an utterance.
+No evidence justifies declaring all of that pause protection redundant.
+
+`FinalTranscriptGate` forwards a valid final immediately; it adds no fixed delay.
+Partials are excluded from opt-out detection, history and LLM execution. There
+is no speculative response, inferred payment information or filler speech.
+
+OpenAI already sends `stream=True` and emits incremental `LLMTextFrame` objects.
+TTS uses Pipecat's supported sentence aggregator. A completed first sentence can
+start synthesis before `LLMFullResponseEndFrame`; an unpunctuated first sentence
+waits for a boundary or the final flush. Token-by-token synthesis was not enabled
+because tiny independent requests can harm prosody and increase request count.
+
+Offline native-strategy tests demonstrate both final-before-policy and
+final-after-policy ordering, including cancellation of the STT safety timer.
+Mocked native OpenAI streaming and native sentence-aggregation tests establish
+incremental delivery without waiting for the whole reply.
+
+## Confirmed fixes
+
+- The prior observer could count upstream/downstream VAD instances separately
+  because the user aggregator emits unpaired directional frames. Instrumentation
+  now observes the canonical aggregator boundary and deduplicates its state.
+- Late provider responses were associated with mutable current-turn state. LLM
+  input metadata and task-local `ContextVar` ownership now follow the actual
+  request through incremental output. TTS ownership travels through its public
+  `process_frame`/text-transform/`run_tts` extension points. Context IDs remain
+  internal; delayed audio never gets relabeled as a new turn.
+- Realtime finals now have a dedicated bounded deadline, default **5 seconds**
+  from the VAD endpoint handoff. The gate owns it; the general STT watchdog is
+  disabled only for this path. Partials don't rearm it. Empty/nonfinal results
+  don't satisfy it. Timeout ends the session safely, fences late finals and
+  closes its timer during teardown.
+- Pipecat's separate no-progress turn fallback is configured later than that
+  deadline (`final timeout + policy floor + 1 second`), so it cannot flush an
+  empty turn and accept a late final into a subsequent turn first.
+- If speech resumes while a manual endpoint is still unresolved, the gate keeps
+  the existing Pipecat user turn open and quarantines finalized segment text.
+  Nothing reaches opt-out, collection rules, history or the LLM until every
+  endpoint created by that pause/resume sequence has returned a distinct final
+  and VAD is silent again. Those finals are then released as one finalized user
+  transcript. The original final deadline is not extended while an older
+  endpoint remains unresolved. Finals outside an endpoint, duplicate finals,
+  deadline expiry and cancellation still fail closed or discard quarantined
+  text. This supports natural pauses without weakening downstream transcript
+  safety; provider frames still expose no verified utterance ID, so unexpected
+  non-identical cross-turn duplicates remain a provider-contract limitation.
+
+There was no proven redundant serial STT wait to delete. Silence thresholds
+remain unchanged pending manual accuracy/latency evaluation. The source defaults
+are now Sarvam Realtime Saaras V4, OpenAI GPT-4.1 Mini and Sarvam Bulbul V3/Shubh.
+Google remains selectable. Existing `.env` values still take precedence and were
+not modified.
+
+## Privacy-safe timestamps and durations
+
+`voice_turn_timing` contains only a fixed stage, opaque session UUID, numeric
+`turn_index`, and `at_ms`: elapsed milliseconds on the session's monotonic
+Pipecat clock. Once speech end is known, `since_speech_end_ms` also reports
+the elapsed duration to that stage. It is not wall time or a browser clock. No transcripts, raw audio,
+credentials, provider payloads, request/context IDs or user identifiers are logged.
+Typed logging accepts only whitelisted stages and finite nonnegative numbers.
+
+Synthetic example:
 
 ```json
-{"event":"voice_latency","level":"INFO","session_id":"00000000-0000-4000-8000-000000000001","turn_index":1,"metric":"llm_first_token_ms","duration_ms":200.0}
+{"event":"voice_turn_timing","level":"INFO","session_id":"00000000-0000-4000-8000-000000000001","turn_index":1,"stage":"vad_stop","at_ms":2400.0}
 ```
 
-Group records by `session_id` and `turn_index`. `turn_index` counts VAD speech-end boundaries, not business outcomes; resumed speech can create another boundary. Session IDs are generated UUIDs, never customer/phone/account IDs. The formatter accepts only typed UUIDs, fixed metric names, positive boundary indices and finite nonnegative durations. It drops arbitrary extras and exception payloads. Model/provider names, TTS context IDs, raw timestamps, audio, user/assistant text, and credentials are not serialized.
+| Stage | Timestamp meaning |
+| --- | --- |
+| `estimated_speech_end` | VAD observation minus the frame's `stop_secs`; physical-end estimate |
+| `vad_stop` | Canonical local VAD stop notification |
+| `stt_endpoint_handoff` | VAD stop reaches STT processor entry; before native tail flush / socket send |
+| `stt_first_interim` | First interim available at the gate; diagnostic only |
+| `stt_final` | Nonempty final accepted by the gate |
+| `turn_strategy_complete` | Stop strategy signals inference readiness, before aggregator context dispatch |
+| `llm_request` | Context is dispatched to the LLM processor |
+| `llm_start` | Native LLM response-start frame, before remote completion work |
+| `llm_first_text` | First streamed LLM answer text |
+| `tts_first_text_delivered` | First LLM text actually processed by TTS, before sentence aggregation |
+| `tts_first_text_chunk` | First aggregated chunk passes TTS's text transform, unchanged |
+| `tts_request` | Entry into the supported `run_tts` synthesis operation |
+| `tts_first_audio` | First correlated audio frame emitted by TTS |
+| `audio_transport_handoff` | Correlated audio enters output transport processing, before transport buffering |
+| `turn_cancelled` | Timing window superseded/invalidated; not a persisted business call outcome |
+| `stt_final_timeout` | Final transcript deadline expired |
 
-## Definitions
+A `turn_index` identifies a VAD speech segment / timing window. A pause followed
+by resumed speech may create another index even when the conversation aggregator
+combines accepted text into one user message. The estimate is logged retrospectively
+at VAD stop. Interim availability may precede that estimate; compute its signed
+difference rather than forcing it to zero. Multiple sessions have independent
+clock origins and bounded state (32 timing windows / TTS contexts). Do not
+subtract `at_ms` values from different session IDs or turn indices.
 
-| Metric | Measured interval | What it tells you |
-| --- | --- | --- |
-| `stt_completion_ms` | Estimated physical speech end → last completed transcription frame used before the LLM request | Endpoint confirmation, upload/network and transcription delay together |
-| `llm_first_token_ms` | LLMFullResponseStartFrame from the LLM → its first LLMTextFrame | Time to first answer text; not time to full answer and not reasoning-token TTFB |
-| `tts_first_audio_ms` | Supported TTS `on_tts_request` callback → first matching TTSAudioRawFrame | Time to first generated audio for the first synthesis request in the measured response |
-| `speech_end_to_first_audio_ms` | Estimated physical speech end → first matching generated audio | Server response generation latency, including turn detection and text aggregation gaps |
-| `speech_end_to_output_start_ms` | Estimated physical speech end → output transport BotStartedSpeakingFrame | Server output-start proxy, including queue/transport handling observed by the worker |
+Existing `voice_latency` names are retained for STT completion, LLM first text,
+TTS first audio and speech-end-to-first-audio. They still emit finite monotonic
+intervals. TTS timing now starts synchronously at synthesis entry rather than
+at a separately scheduled event callback. This is more precise but should be
+noted when comparing earlier measurements.
 
-All intervals use a shared Pipecat `SystemClock` (`time.monotonic_ns`). Frame timing comes from the supported `BaseObserver` / `FramePushed.timestamp` interface at the time the frame is pushed, not when the asynchronous observer processes it. TTS request callbacks sample that same clock. TTS callbacks are scheduled by Pipecat, so their timestamp can include callback scheduling error. Frame clocks and callbacks share the same origin; no wall-clock timestamp is subtracted from a monotonic time.
+The previous `speech_end_to_output_start_ms` is not guessed for bound session
+traces: Pipecat's output rechunking discards context IDs, so a later
+`BotStartedSpeakingFrame` cannot always be assigned safely after interruptions.
+Use the new correlated `audio_transport_handoff` boundary. Neither timestamp
+measures a successful WebRTC packet transmission or browser audibility. Device
+latency, network/jitter buffers, autoplay and leading silence remain unmeasured.
 
-Pipecat 1.12.0's native TTFB metrics and aggregate UserBotLatencyObserver use wall-clock timestamps. This implementation instead uses supported frame/events to meet the monotonic-clock requirement. Native usage metrics, tracing, RTVI forwarding and dependency logs remain disabled. No parallel pipeline or SDK calls are introduced.
+Only accepted/attributable phases are emitted. Greeting, fixed opt-out speech,
+missing stages, interrupted requests and expired/ambiguous finals may omit later
+measurements; omissions are not zero-latency successes. Earlier completed samples
+may remain in the log when their timing window is later superseded. Stage
+ownership is explicitly implemented for OpenAI LLM with Sarvam/Google TTS;
+other retained adapters can omit unsupported stages rather than infer ownership.
 
-VAD declares speech ended after a configured silence window. We subtract `VADUserStoppedSpeakingFrame.stop_secs` from its monotonic timestamp to estimate the physical end of speech, ignoring its wall-clock `timestamp` field. This includes the VAD silence window in the reported speech-to-response latency. It is an estimate: input buffering, audio-device delay and VAD scheduling can affect the actual boundary.
+## Locating the bottleneck
 
-InterimTranscriptionFrame is excluded. The `sarvam-realtime` path additionally requires `TranscriptionFrame.finalized=True`; partial and nonfinal frames cannot complete STT timing or cancel its watchdog. Other adapters retain the existing completed-segment frame-type behavior for compatibility. For providers that emit multiple completed segments, the last segment seen before LLM start is used. STT timing is emitted when that request starts, or on interruption/end/cleanup if a completed segment exists. It excludes any transcription arriving after LLM inference has already started.
+Compute these differences within each `(session_id, turn_index)`:
 
-## Audible response limitations
+| Difference | Interpretation |
+| --- | --- |
+| VAD stop − estimated speech end | Configured endpoint silence plus scheduling effects |
+| Endpoint handoff − VAD stop | Pipeline scheduling before Sarvam receives its boundary |
+| STT final − endpoint handoff | Tail flush/send, network and provider finalization together; not pure inference time |
+| Turn strategy complete − max(VAD stop, STT final) | Remaining policy floor / local strategy scheduling |
+| LLM start − turn strategy complete | Aggregator / dispatch scheduling |
+| LLM first text − LLM start | Remote request and answer-text latency |
+| TTS first text delivered − LLM first text | Downstream queue/backpressure |
+| TTS first text chunk − TTS first text delivered | First-sentence aggregation delay |
+| TTS request − TTS first text chunk | Local TTS preparation / queueing |
+| TTS first audio − TTS request | Synthesis/network/first emitted chunk delay |
+| Audio transport handoff − TTS first audio | Pipeline delivery to transport |
+| TTS first audio − estimated speech end | Total server-side speech-end-to-first-audio latency |
 
-**Output start is not proof of audibility at the browser.** Pipecat's BotStartedSpeakingFrame can precede actual speaker playback and TTS audio can contain leading silence. WebRTC delivery, jitter buffering, autoplay policy, output-device buffering and acoustic playback are not measured here. The generated-audio and output-start metrics are useful server proxies, not a claimed end-to-end audible latency. A true first-audible metric requires client playback/audio analysis and clock correlation, which this focused change does not add.
+Do not sum independently averaged stage metrics; overlapping waits and omitted
+samples make that misleading. Compare p50/p95 across representative synthetic
+Hindi/Hinglish turns and count failed/ambiguous/expired turns separately.
 
-Greeting, fixed opt-out speech, cancelled inference, empty answers, tool-only responses and missing/unsupported provider events may omit some or all latency stages. Missing values are not logged as zero. Once a response is interrupted, stale timing is discarded; matching TTS context IDs are used internally to avoid pairing unrelated audio with a new request. Only the first token/audio/output interval per boundary is emitted. TTS request metadata is bounded to 32 pending contexts per session and cleared at teardown. No transcript/audio is retained by the timing state.
+## Configuration and manual comparison
 
-## Identifying bottlenecks
+No `.env` was changed. Relevant validated controls:
 
-- High `stt_completion_ms`: check VAD stop duration, network/upload time and transcription performance. Whisper is utterance-based; it uploads after VAD segmentation. This metric is not pure provider processing time.
-- High `llm_first_token_ms`: compare model latency and prompt/history size using synthetic data. It includes service request/stream delay and time before answer text; it says nothing about full-response generation time.
-- High `tts_first_audio_ms`: check synthesis model/voice startup, provider connection and text size. It starts after text aggregation has produced a TTS request.
-- Fast component metrics but high `speech_end_to_first_audio_ms`: examine turn-silence policy and the wait for enough LLM text to synthesize a sentence. Those waits are not included in the LLM/TTS component intervals.
-- A large gap from generated audio to output start suggests server output buffering/scheduling. Slow perceived playback with normal server metrics points toward the browser/network/device side and needs client measurements.
+| Variable | Default / range |
+| --- | --- |
+| `TECHFI_VAD_START_SECONDS` | 0.2; 0.05–1 |
+| `TECHFI_VAD_STOP_SECONDS` | 0.4; 0.1–2 |
+| `TECHFI_TURN_SILENCE_SECONDS` | 0.6; 0–3 |
+| `TECHFI_STT_FINAL_TIMEOUT_SECONDS` | 5; 0.5–30 |
+| `TECHFI_PROVIDER_TIMEOUT_SECONDS` | 20; unchanged LLM/TTS progress protection |
+| `TECHFI_STT_STREAM_TYPE` | `balanced`; `fast` remains an explicit option |
 
-Do not blindly sum component metrics: pipeline stages overlap, STT includes endpointing, and text aggregation/turn policy introduce additional gaps. Compare p50/p95 of each metric over representative completed turns. Compare like-for-like configurations, and do not treat omitted samples from interrupted or failed responses as successful zero-latency calls. The logs intentionally contain no user identity or configuration labels; manage any configuration grouping outside these customer sessions.
-
-## Prompt migration and validation
-
-The unchanged `conversational_prompt(settings.system_prompt)` is now passed as `Settings(system_instruction=...)` to both OpenAI and Groq LLM integrations. LLMContext starts empty and contains conversation history only. The provider adapter still prepends the same system instruction to the actual request, preserving the loan-reminder/identity/disclosure/opt-out instructions and removing the deprecated initial-context system message.
-
-Offline regression tests use synthetic timestamps and payloads to verify exact intervals, clock independence, stage deduplication, cancellation/session isolation, formatter rejection of unsafe values, both provider settings and the final provider-request prompt. No paid API call, live conversation or socket integration test is needed. Run:
+For your manual test, first keep the old 0.4/0.6 silence thresholds and compare
+traces. If a substantial gap consistently remains between final and strategy
+completion, evaluate a smaller post-VAD policy such as `0.3` explicitly:
 
 ```sh
+TECHFI_TURN_SILENCE_SECONDS=0.3 uv run --no-sync techfi-voice
+```
+
+This is an opt-in experiment, not a proven accuracy-preserving default. Test
+within-sentence pauses, amounts/dates/names, Hindi and mixed English, rapid
+barge-in, missing/late finals and opt-out. Do not lower VAD and policy together
+when trying to isolate the cause. Use the playground's Sarvam or Google choice
+between sessions. Stop and restart to revert. A separately authorized manual
+session can incur provider charges; none was launched automatically here.
+
+Offline checks:
+
+```sh
+uv run --no-sync pytest -q
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
-uv run --no-sync pytest -q
+node --check apps/voice-worker/src/techfi_voice/static/client.js
+node --test tests/test_playground_client.cjs
 ```
+
+Source references: [Pipecat turn strategies](https://docs.pipecat.ai/api-reference/server/utilities/turn-management/user-turn-strategies.md),
+[Sarvam STT integration](https://docs.pipecat.ai/api-reference/server/services/stt/sarvam),
+and installed pinned `speech_timeout_user_turn_stop_strategy.py`,
+`llm_response_universal.py`, Sarvam/OpenAI/TTS services and `base_output.py`.
+These implementation boundaries were checked directly rather than inferred
+from aggregate manual measurements. No changes were committed or pushed.
+
+Validation on 18 October 2026: **106 Python tests passed**, one socket test
+deselected; **4 mocked Node tests passed**. Ruff lint/format, JavaScript syntax
+and diff whitespace checks passed. Nine warnings originate upstream. The
+manual microphone/provider latency comparison remains unperformed.
+
+## Follow-up: supplied live trace
+
+The [19 October trace review](stt-live-review-2026-10-19.md) identifies a local
+Whisper override, delayed-segment risks and misleading cancellation labels.
+The fence now also protects native segmented STT; configuration profiles, raw
+final-frame counters, successful Sarvam endpoint sends and typed closure reasons
+make future runs distinguishable without logging content.

@@ -1,6 +1,6 @@
 # Sarvam Realtime STT
 
-The optional `sarvam-realtime` selector uses Pipecat 1.12.0's supported
+The default `sarvam-realtime` selector uses Pipecat 1.12.0's supported
 `SarvamRealtimeSTTService` with `Settings(model="saaras:v4", ...)`. The existing
 lockfile already supplies this service; no dependency upgrade is required.
 OpenAI LLM (`gpt-4.1-mini`) and Sarvam TTS (`bulbul:v3`) are unchanged.
@@ -45,7 +45,7 @@ the usual startup command. `SARVAM_API_KEY` supplies realtime STT and Sarvam TTS
 `TECHFI_STT_API_KEY` takes precedence and must match the selected provider.
 Never paste keys into commands or logs. Preflight validates configuration only,
 without provider connections or credential checks. The application does not
-modify `.env`, and Whisper remains the default selector.
+modify `.env`, and Sarvam Realtime is the default selector; Whisper remains a manual fallback.
 
 ## Streaming, endpointing and session behavior
 
@@ -63,7 +63,8 @@ aggregation. Partials are discarded at this boundary; empty-turn LLM recovery
 is disabled for this path. Local VAD interruptions still pass through.
 
 Pipecat disables automatic reconnection for this realtime service. A connection
-error, unusable socket or provider progress timeout ends the current session;
+error, unusable socket, ambiguous overlapping endpoint, or bounded final-transcript
+timeout ends the current session;
 audio is not replayed, history is not merged and Whisper is not selected
 automatically. Start a new session after recovery or a manual provider switch.
 This favors transcript consistency over transparent reconnects.
@@ -108,3 +109,6 @@ API references: [Pipecat Sarvam STT](https://docs.pipecat.ai/api-reference/serve
 and [Sarvam realtime streaming](https://docs.sarvam.ai/api/api-guides-tutorials/speech-to-text/realtime-streaming).
 The installed pinned implementation was checked for constructor settings,
 manual endpoint events and final-frame semantics; recheck these before upgrades.
+
+For the dedicated final deadline, overlap handling and per-stage timing definitions,
+see the [latency investigation](latency.md). No live latency improvement is claimed.

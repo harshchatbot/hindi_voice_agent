@@ -50,7 +50,9 @@ def realtime_settings(**overrides):
 def test_realtime_constructor_uses_supported_settings(monkeypatch):
     constructor = MagicMock()
     constructor.Settings = SarvamRealtimeSTTService.Settings
-    monkeypatch.setattr("pipecat.services.sarvam.stt.SarvamRealtimeSTTService", constructor)
+    monkeypatch.setattr(
+        "techfi_voice.integrations.sarvam.ConfiguredSarvamRealtimeSTTService", constructor
+    )
     monkeypatch.setattr("techfi_voice.integrations.providers._llm", MagicMock())
     monkeypatch.setattr("techfi_voice.integrations.providers._tts", MagicMock())
     services = create_services(realtime_settings(stt_mode="codemix"))
@@ -78,7 +80,7 @@ def test_sarvam_credentials_are_used_only_for_sarvam_roles(tmp_path):
     assert settings.tts_api_key.get_secret_value() == "synthetic-sarvam"
     assert settings.llm_provider == "openai" and settings.tts_provider == "sarvam"
     assert voice_settings().stt_provider == "sarvam"  # existing adapter still available
-    assert VoiceSettings.model_fields["stt_provider"].default == "openai"
+    assert VoiceSettings.model_fields["stt_provider"].default == "sarvam-realtime"
 
 
 @pytest.mark.parametrize(

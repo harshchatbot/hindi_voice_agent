@@ -18,6 +18,7 @@ def test_intended_stack_and_conventional_credentials(tmp_path):
     settings = VoiceSettings(
         _env_file=path,
         tenant_id=uuid4(),
+        stt_provider="openai",
         stt_model="whisper-1",
         llm_model="gpt-4.1-mini",
         tts_model="bulbul:v3",

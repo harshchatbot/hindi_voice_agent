@@ -1,7 +1,34 @@
 "use strict";
 const startButton = document.querySelector("#start");
 const stopButton = document.querySelector("#stop");
+const llmSelect = document.querySelector("#llm-provider");
 const providerSelect = document.querySelector("#voice-provider");
+const agentSelect = document.querySelector("#agent-type");
+const personaSelect = document.querySelector("#persona");
+const collectionFields = document.querySelector("#collection-fields");
+const resultView = document.querySelector("#collection-result");
+let activeAgentType = "general";
+const controls = [providerSelect, llmSelect, agentSelect, personaSelect, collectionFields];
+function lockConfiguration(locked) { controls.forEach(control => { control.disabled = locked; }); }
+function updateOptions() {
+  collectionFields.hidden = agentSelect.value !== "soft-collection";
+  const female = personaSelect.value === "female";
+  const labels = female ? ["Sarvam Bulbul V3 — Ritu", "Sarvam Bulbul V4 Flash — Ritu Hindi (Experimental)", "Google Chirp 3 HD — Kore"] : ["Sarvam Bulbul V3 — Shubh", "Sarvam Bulbul V4 Flash — Shubh Hindi (Experimental)", "Google Chirp 3 HD — Achird"];
+  if (providerSelect.options) Array.from(providerSelect.options).forEach((option, index) => { option.textContent = labels[index]; });
+}
+agentSelect.addEventListener("change", updateOptions);
+personaSelect.addEventListener("change", updateOptions);
+updateOptions();
+
+function demoConfiguration() {
+  const ids = ["bank-name", "customer-name", "emi-amount", "due-date", "loan-type", "payment-status", "payment-methods"];
+  const fields = ids.map(id => document.querySelector(`#${id}`));
+  if (fields.some(input => input.reportValidity && !input.reportValidity())) throw new Error("invalid_demo");
+  return {fictional: true, bank_name: fields[0].value, customer_name: fields[1].value,
+    emi_amount: fields[2].value, due_date: fields[3].value, loan_type: fields[4].value,
+    payment_status: fields[5].value, payment_methods: Array.from(fields[6].selectedOptions).map(option => option.value)};
+}
+
 const status = document.querySelector("#status");
 const statusBadge = document.querySelector("#status-badge");
 const statusLabel = document.querySelector("#status-label");
@@ -89,6 +116,9 @@ function attachMeter(mediaStream, elementId) {
 async function stop(message = "Conversation ended. You can start a new session.", state = "disconnected") {
   generation += 1;
   const id = pcId;
+  const wasCollection = activeAgentType === "soft-collection";
+  activeAgentType = "general";
+  const endedGeneration = generation;
   pcId = null;
   controller?.abort(); controller = null;
   clearTimeout(connectTimer); clearInterval(heartbeat);
@@ -99,7 +129,7 @@ async function stop(message = "Conversation ended. You can start a new session."
   resetMeters();
   playbackHelp.textContent = "Use headphones. If playback is blocked, press Play above.";
   setStatus(state, message);
-  startButton.disabled = false; stopButton.disabled = true; providerSelect.disabled = false;
+  startButton.disabled = false; stopButton.disabled = true; lockConfiguration(false);
   // Finish local cleanup before this bounded request. A new start cannot be unlocked by an old reply.
   if (id) {
     try {
@@ -107,6 +137,23 @@ async function stop(message = "Conversation ended. You can start a new session."
         method: "POST", headers, keepalive: true, signal: AbortSignal.timeout(3000)
       });
     } catch { /* Server also handles peer disconnect and maximum session duration. */ }
+  }
+  if (id && wasCollection) {
+    resultView.textContent = "Waiting for the local structured outcome…";
+    const resultDeadline = Date.now() + 15000;
+    for (let attempt = 0; attempt < 30 && Date.now() < resultDeadline && generation === endedGeneration; attempt += 1) {
+      try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/result`, {method: "POST", headers, signal: AbortSignal.timeout(2000)});
+        if (generation !== endedGeneration) return;
+        if (response.status === 200) {
+          const data = await response.json();
+          if (generation === endedGeneration) resultView.textContent = JSON.stringify(data, null, 2);
+          return;
+        }
+      } catch { /* No error bodies or user data are logged. */ }
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+    if (generation === endedGeneration) resultView.textContent = "Outcome not yet available; server cleanup may still be running. Local results are temporary, not a durable bank record.";
   }
 }
 
@@ -131,7 +178,15 @@ function waitForIce(connection, signal) {
 startButton.addEventListener("click", async () => {
   if (startButton.disabled) return;
   const voiceProvider = providerSelect.value;
-  startButton.disabled = true; stopButton.disabled = false; providerSelect.disabled = true;
+  const llmProvider = llmSelect.value;
+  const agentType = agentSelect.value;
+  const persona = personaSelect.value;
+  let demo = null;
+  try { if (agentType === "soft-collection") demo = demoConfiguration(); }
+  catch { setStatus("error", "Use valid fictional demo fields; do not enter real customer data."); return; }
+  activeAgentType = agentType;
+  resultView.textContent = "No outcome yet. This session has its own fictional report.";
+  startButton.disabled = true; stopButton.disabled = false; lockConfiguration(true);
   const current = ++generation;
   setStatus("connecting", "Requesting microphone access…");
   controller = new AbortController();
@@ -189,10 +244,13 @@ startButton.addEventListener("click", async () => {
     setStatus("connecting", "Connecting to your selected voice…");
     const response = await fetch("/api/offer", {
       method: "POST", headers,
-      body: JSON.stringify({sdp: connection.localDescription.sdp, type: connection.localDescription.type, voice_provider: voiceProvider}),
+      body: JSON.stringify({sdp: connection.localDescription.sdp, type: connection.localDescription.type, voice_provider: voiceProvider, llm_provider: llmProvider, persona, agent_type: agentType, ...(demo ? {collection: demo} : {})}),
       signal: AbortSignal.any([signal, AbortSignal.timeout(60000)])
     });
-    if (!response.ok) throw new Error("session_unavailable");
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error === "collection_demo_not_authorized" ? "collection_policy" : "session_unavailable");
+    }
     const answer = await response.json();
     if (current !== generation) {
       await fetch(`/api/sessions/${encodeURIComponent(answer.pc_id)}/stop`, {
@@ -206,9 +264,11 @@ startButton.addEventListener("click", async () => {
     if (connection.connectionState !== "connected") connectTimer = setTimeout(() => {
       if (current === generation) void stop("Connection timed out. Please try again.", "error");
     }, 30000);
-  } catch {
-    if (current === generation) await stop("Unable to connect. Check microphone permission and the local worker configuration.", "error");
+  } catch (error) {
+    if (current === generation) await stop(error.message === "collection_policy"
+      ? "Collection demo blocked: check server enablement, India calling hours, retry limits or prior opt-out."
+      : "Unable to connect. Check microphone permission and the local worker configuration.", "error");
   }
 });
-stopButton.addEventListener("click", () => void stop("You ended this conversation. Your microphone is off."));
+stopButton.addEventListener("click", () => stop("You ended this conversation. Your microphone is off."));
 window.addEventListener("pagehide", () => { void stop(); });

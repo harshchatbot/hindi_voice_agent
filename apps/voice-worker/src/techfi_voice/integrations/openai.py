@@ -2,8 +2,10 @@ from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 
+from techfi_voice.integrations.timing import CorrelatedLLMMixin
 
-class ConfiguredOpenAILLMService(OpenAILLMService):
+
+class ConfiguredOpenAILLMService(CorrelatedLLMMixin, OpenAILLMService):
     """Use the supported client factory hook for bounded HTTP reads and no silent retries."""
 
     def __init__(self, *, timeout_seconds: float, **kwargs):

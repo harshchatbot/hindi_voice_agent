@@ -70,3 +70,13 @@ footer { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; col
 @media (max-width: 580px) { .site-header { height: 70px; padding: 0 20px; } .brand-product, .brand-divider { display: none; } .brand { font-size: 15px; gap: 9px; } .local-badge { font-size: 10px; } main { padding: 34px 16px 18px; } .playground { padding: 22px 18px; border-radius: 20px; } .activity-row { gap: 14px; } .activity-channel { gap: 7px; } .meter { gap: 2px; } .actions { flex-direction: column; } .button { width: 100%; } .intro-copy { font-size: 13px; } }
 @media (max-width: 360px) { .local-badge { display: none; } .activity-row { gap: 10px; } .activity-channel { flex-direction: column; gap: 6px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+.collection-fields { border: 1px solid #dce5f1; border-radius: 12px; padding: 16px; margin: 0 0 20px; min-width: 0; }
+.collection-fields legend { font-weight: 650; font-size: 13px; padding: 0 6px; }
+.demo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.demo-grid label { font-size: 11px; color: #495a75; }
+.demo-grid input, .demo-grid select { display: block; width: 100%; margin-top: 6px; padding: 10px; border: 1px solid #d7dfec; border-radius: 8px; background: #fff; color: #253858; font: inherit; }
+.full-width { grid-column: 1 / -1; }
+#outcome-panel { margin-top: 20px; font-size: 12px; }
+#collection-result { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; max-height: 320px; overflow: auto; }
+@media (max-width: 580px) { .demo-grid { grid-template-columns: 1fr; } }

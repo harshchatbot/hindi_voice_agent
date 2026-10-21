@@ -6,13 +6,24 @@ build-backend = "hatchling.build"
 name = "techfi-voice-worker"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
-dependencies = ["techfi-shared", "loguru>=0.7,<1", "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "openai>=1.74,<4", "audioop-lts>=0.2,<1; python_version >= '3.13'", "pipecat-ai[silero,webrtc,sarvam,deepgram,groq,cartesia]==1.12.0"]
+dependencies = [
+    "techfi-shared",
+    "loguru>=0.7,<1",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+    "openai>=1.74,<4",
+    "audioop-lts>=0.2,<1; python_version >= '3.13'",
+    "pipecat-ai[silero,webrtc,sarvam,deepgram,groq,cartesia]==1.12.0",
+    "openai-whisper>=20250625",
+]
 
 [project.optional-dependencies]
 google = ["pipecat-ai[google]==1.12.0"]
+native = ["pipecat-ai[local]==1.12.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/techfi_voice"]
 
 [project.scripts]
 techfi-voice = "techfi_voice.main:main"
+techfi-collection-sim = "techfi_voice.native_simulation:main"

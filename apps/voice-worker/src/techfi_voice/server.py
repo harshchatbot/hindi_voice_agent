@@ -1,4 +1,6 @@
 import asyncio
+import time
+from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
 from importlib.resources import files
 from typing import Literal
@@ -6,16 +8,17 @@ from typing import Literal
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from techfi_shared.contracts import CallOutcome
 from techfi_shared.errors import ApplicationError, ProviderError
 from techfi_shared.logging import Event, configure_logging
 
+from techfi_voice.collection import DemoCallingPolicy, DemoCase
 from techfi_voice.config import VoiceSettings
 from techfi_voice.integrations.providers import (
     create_services,
-    playground_tts_settings,
+    playground_settings,
     validate_provider_settings,
 )
 from techfi_voice.runtime import run_session
@@ -26,7 +29,17 @@ class Offer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sdp: str = Field(min_length=1, max_length=65536)
     type: Literal["offer"]
-    voice_provider: Literal["sarvam", "google"] = "sarvam"
+    voice_provider: Literal["sarvam", "google", "sarvam-v4-flash"] = "sarvam"
+    llm_provider: Literal["openai", "sarvam"] = "openai"
+    persona: Literal["male", "female"] = "male"
+    agent_type: Literal["general", "soft-collection"] = "general"
+    collection: DemoCase | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def agent_case(self):
+        if (self.agent_type == "soft-collection") != (self.collection is not None):
+            raise ValueError("collection demo fields required only for collection agents")
+        return self
 
 
 def create_app(
@@ -36,6 +49,7 @@ def create_app(
     connection_factory=None,
     session_builder=build_session,
     session_runner=run_session,
+    collection_policy=None,
 ) -> FastAPI:
     # Suppress dependency logs before any Pipecat or SDK import.
     from loguru import logger
@@ -49,6 +63,14 @@ def create_app(
     from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
     connection_factory = connection_factory or SmallWebRTCConnection
+    collection_policy = collection_policy or DemoCallingPolicy(
+        settings.collection_demo_enabled,
+        settings.collection_start_hour,
+        settings.collection_end_hour,
+        settings.collection_max_attempts_per_day,
+        settings.collection_retry_gap_seconds,
+    )
+    results = OrderedDict()  # Bounded, short-lived local demo outcomes; no transcripts or names.
     connections = {}
     sessions = {}
     jobs: set[asyncio.Task] = set()
@@ -135,12 +157,32 @@ def create_app(
         nonlocal active
         # Resolve before opening a peer or reserving a slot; no provider clients here.
         try:
-            session_settings = playground_tts_settings(settings, body.voice_provider)
+            values = settings.model_dump()
+            values.update(agent_type=body.agent_type, collection_case=body.collection)
+            base = VoiceSettings(
+                _env_file=None,
+                **values,
+                SARVAM_API_KEY=settings.sarvam_api_key,
+                OPENAI_API_KEY=settings.openai_api_key,
+                google_application_credentials=settings.google_application_credentials,
+            )
+            session_settings = playground_settings(
+                base, body.voice_provider, body.llm_provider, body.persona
+            )
         except Exception:
             raise ProviderError() from None
         async with reservation:
             if active >= settings.max_sessions:
                 return JSONResponse(status_code=429, content={"error": "session_limit"})
+            if body.agent_type == "soft-collection":
+                collection_policy.admit(settings.tenant_id)
+                session_settings = session_settings.model_copy(
+                    update={
+                        "max_session_seconds": min(
+                            settings.max_session_seconds, collection_policy.remaining_seconds()
+                        )
+                    }
+                )
             active += 1
         connection = None
         transferred = False
@@ -152,7 +194,16 @@ def create_app(
                 connection,
                 TransportParams(audio_in_enabled=True, audio_out_enabled=True),
             )
-            session = session_builder(session_settings, transport, service_factory)
+            session = session_builder(
+                session_settings,
+                transport,
+                service_factory,
+                **(
+                    {"collection_policy": collection_policy}
+                    if body.agent_type == "soft-collection"
+                    else {}
+                ),
+            )
             connections[connection.pc_id] = connection
             sessions[connection.pc_id] = session
             greeted = False
@@ -161,10 +212,20 @@ def create_app(
             async def connected(transport, client):
                 nonlocal greeted
                 if not greeted:
+                    if (
+                        body.agent_type == "soft-collection"
+                        and not collection_policy.within_hours()
+                    ):
+                        session.stop.set()
+                        return
                     from pipecat.frames.frames import TTSSpeakFrame
 
                     greeted = True
-                    await session.task.queue_frame(TTSSpeakFrame(text=session_settings.greeting))
+                    await session.task.queue_frame(
+                        TTSSpeakFrame(
+                            text=getattr(session, "greeting", None) or session_settings.greeting
+                        )
+                    )
 
             @transport.event_handler("on_client_disconnected")
             async def disconnected(transport, client):
@@ -179,6 +240,20 @@ def create_app(
                 except Exception:
                     safe_logger.error(Event.WORKER_FAILED)
                 finally:
+                    if getattr(session, "collection", None):
+                        result = session.result().model_dump(mode="json")
+                        results[connection.pc_id] = (time.monotonic(), result)
+                        while len(results) > 16:
+                            results.popitem(last=False)
+                    if body.agent_type == "soft-collection":
+                        collection_policy.release(
+                            settings.tenant_id,
+                            suppress=bool(getattr(session, "collection", None))
+                            and (
+                                session.collection.result().do_not_call_request
+                                or session.collection.result().call_outcome == "wrong_recipient"
+                            ),
+                        )
                     await close_connection(connection)
                     connections.pop(connection.pc_id, None)
                     sessions.pop(connection.pc_id, None)
@@ -197,12 +272,28 @@ def create_app(
             raise ProviderError() from None
         finally:
             if not transferred:
+                if body.agent_type == "soft-collection":
+                    collection_policy.release(settings.tenant_id)
                 if connection:
                     connections.pop(connection.pc_id, None)
                     sessions.pop(connection.pc_id, None)
                     await close_connection(connection)
                 async with reservation:
                     active -= 1
+
+    @app.post("/api/sessions/{pc_id}/result")
+    async def result(pc_id: str):
+        # Same-origin POST guard applies. Only opaque IDs, not names, select a result.
+        for key, (created, _) in list(results.items()):
+            if time.monotonic() - created > 600:
+                results.pop(key, None)
+        value = results.get(pc_id)
+        if value:
+            return value[1]
+        return JSONResponse(
+            status_code=202 if pc_id in sessions else 404,
+            content={"status": "pending" if pc_id in sessions else "unavailable"},
+        )
 
     @app.post("/api/sessions/{pc_id}/stop", status_code=204)
     async def stop(pc_id: str):

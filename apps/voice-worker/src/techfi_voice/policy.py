@@ -20,7 +20,7 @@ def requests_opt_out(text: str, phrases: tuple[str, ...]) -> bool:
 class OptOutProcessor(FrameProcessor):
     """Consume explicit opt-outs before user input reaches the LLM."""
 
-    def __init__(self, phrases: tuple[str, ...], on_opt_out: Callable[[], Awaitable[None]]):
+    def __init__(self, phrases: tuple[str, ...], on_opt_out: Callable[[str], Awaitable[None]]):
         super().__init__()
         self._phrases = phrases
         self._on_opt_out = on_opt_out
@@ -34,6 +34,13 @@ class OptOutProcessor(FrameProcessor):
             if requests_opt_out(frame.text, self._phrases):
                 self._ended = True
                 await self.broadcast_interruption()
-                await self._on_opt_out()
+                await self._on_opt_out(frame.text)
                 return
         await self.push_frame(frame, direction)
+
+
+def requests_do_not_call(text: str) -> bool:
+    # Ending this conversation alone is not a request to suppress future contact.
+    return requests_opt_out(
+        text, ("do not call", "don't call", "call mat karo", "कॉल मत करो", "opt out")
+    )

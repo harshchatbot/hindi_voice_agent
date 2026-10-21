@@ -59,6 +59,8 @@ def test_preset_model_and_voice_come_only_from_server_configuration():
     "extra",
     [
         {"voice_provider": "unknown"},
+        {"llm_provider": "unknown"},
+        {"llm_provider": "sarvam", "llm_model": "client-controlled"},
         {"voice_provider": "google", "tts_voice_id": "client-controlled"},
         {"voice_provider": "sarvam", "tts_model": "client-controlled"},
         {"voice_provider": "google", "credentials": "private"},
@@ -111,7 +113,7 @@ def test_offer_routes_each_voice_to_existing_factory_with_independent_settings(m
         executed.append(settings)
         await session.stop.wait()
 
-    base = voice_settings()
+    base = voice_settings(SARVAM_API_KEY="synthetic-sarvam", max_sessions=6)
     with TestClient(
         create_app(
             base,
@@ -121,22 +123,30 @@ def test_offer_routes_each_voice_to_existing_factory_with_independent_settings(m
             session_runner=run,
         )
     ) as client:
-        for extra in ({}, {"voice_provider": "google"}):
+        choices = [
+            (tts, llm)
+            for tts in ("sarvam", "google", "sarvam-v4-flash")
+            for llm in ("openai", "sarvam")
+        ]
+        for tts, llm in choices:
+            extra = {"voice_provider": tts, "llm_provider": llm}
             response = client.post(
                 "/api/offer",
                 json={"sdp": "synthetic", "type": "offer"} | extra,
                 headers=HEADERS,
             )
             assert response.status_code == 200
-        assert [s.tts_provider for s in selected] == ["sarvam", "google"]
+        assert [(s.tts_provider, s.llm_provider) for s in selected] == choices
+        assert [s.llm_model for s in selected] == ["gpt-4.1-mini", "sarvam-105b-conversations"] * 3
+        assert len({s.scope.session_id for s in sessions}) == 6
         assert selected[0] is not selected[1] and selected[0] is not base
         assert sessions[0].scope.session_id != sessions[1].scope.session_id
-        for index in range(2):
+        for index in range(6):
             assert (
                 client.post(f"/api/sessions/opaque-peer-{index}/stop", headers=HEADERS).status_code
                 == 204
             )
-    assert len(executed) == 2
+    assert len(executed) == 6
     assert executed[0] is selected[0] and executed[1] is selected[1]
     for connection in connections:
         connection.disconnect.assert_awaited_once()

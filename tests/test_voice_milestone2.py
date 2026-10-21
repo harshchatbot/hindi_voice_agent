@@ -64,8 +64,8 @@ def test_provider_capability_validation(override):
 
 def test_supported_provider_services_are_injected_with_settings(monkeypatch):
     from pipecat.services.sarvam.stt import SarvamSTTService
-    from pipecat.services.sarvam.tts import SarvamTTSService
     from techfi_voice.integrations.openai import ConfiguredOpenAILLMService
+    from techfi_voice.integrations.sarvam import ConfiguredSarvamTTSService as SarvamTTSService
 
     constructors = []
     for cls in (SarvamSTTService, ConfiguredOpenAILLMService, SarvamTTSService):
@@ -76,7 +76,9 @@ def test_supported_provider_services_are_injected_with_settings(monkeypatch):
     monkeypatch.setattr(
         "techfi_voice.integrations.openai.ConfiguredOpenAILLMService", constructors[1]
     )
-    monkeypatch.setattr("pipecat.services.sarvam.tts.SarvamTTSService", constructors[2])
+    monkeypatch.setattr(
+        "techfi_voice.integrations.sarvam.ConfiguredSarvamTTSService", constructors[2]
+    )
     settings = voice_settings()
     services = create_services(settings)
     assert services.stt is constructors[0].return_value

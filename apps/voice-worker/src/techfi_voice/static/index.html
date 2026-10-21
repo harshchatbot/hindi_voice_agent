@@ -24,9 +24,46 @@
         <span id="status-badge" class="status-badge" data-state="ready"><span aria-hidden="true"></span><span id="status-label">Ready</span></span>
       </div>
       <div class="voice-field">
+        <label for="agent-type">Agent type</label>
+        <div class="select-wrap"><select id="agent-type">
+          <option value="general" selected>General Assistant</option>
+          <option value="soft-collection">Soft Collection Agent — Fictional demo</option>
+        </select></div>
+      </div>
+      <div class="voice-field">
+        <label for="persona">Grammatical persona</label>
+        <div class="select-wrap"><select id="persona" aria-describedby="persona-help">
+          <option value="male" selected>Male</option><option value="female">Female</option>
+        </select></div>
+        <p id="persona-help" class="field-help">Matches the server-approved voice and Hindi self-reference.</p>
+      </div>
+      <fieldset id="collection-fields" class="collection-fields" hidden>
+        <legend>Fictional test data only</legend>
+        <p class="field-help">Do not enter real customer data. All records below are invented. This public test challenge is not real identity verification: say “neela kamal”.</p>
+        <div class="demo-grid">
+          <label>Demo bank name<input id="bank-name" value="Demo Prerna Bank" maxlength="64" required pattern="Demo .+"></label>
+          <label>Demo customer name<input id="customer-name" value="Demo Asha Verma" maxlength="64" required pattern="Demo .+"></label>
+          <label>Fictional EMI (INR)<input id="emi-amount" type="number" value="4500.00" min="0.01" max="1000000" step="0.01" required></label>
+          <label>Fictional due date<input id="due-date" type="date" value="2026-10-25" required></label>
+          <label>Loan type<select id="loan-type"><option value="personal">Personal</option><option value="vehicle">Vehicle</option><option value="education">Education</option><option value="housing">Housing</option></select></label>
+          <label>Fictional record status<select id="payment-status"><option value="due">Due</option><option value="overdue">Overdue</option><option value="paid">Paid</option></select></label>
+          <label class="full-width">Approved demo payment methods (select one or more)<select id="payment-methods" multiple required size="4"><option value="official_app" selected>Official bank app</option><option value="bank_branch" selected>Bank branch</option><option value="upi">Official bank UPI</option><option value="bank_transfer">Official bank transfer</option></select></label>
+        </div>
+        <p class="field-help">Calling window: 8 a.m.–7 p.m. India time (or a narrower server policy). Demo mode must be enabled by the server operator. Retry and suppression limits apply.</p>
+      </fieldset>
+      <div class="voice-field">
+        <label for="llm-provider">Conversation model</label>
+        <div class="select-wrap"><select id="llm-provider" aria-describedby="llm-help">
+          <option value="openai" selected>OpenAI GPT-4.1 Mini</option>
+          <option value="sarvam">Sarvam 105B Conversations — Experimental</option>
+        </select></div>
+        <p id="llm-help" class="field-help">Choose before connecting. Experimental models need manual evaluation.</p>
+      </div>
+      <div class="voice-field">
         <label for="voice-provider">Voice provider</label>
         <div class="select-wrap"><select id="voice-provider" aria-describedby="voice-help">
           <option value="sarvam" selected>Sarvam Bulbul V3 — Shubh</option>
+          <option value="sarvam-v4-flash">Sarvam Bulbul V4 Flash — Shubh Hindi (Experimental)</option>
           <option value="google">Google Chirp 3 HD — Achird</option>
         </select></div>
         <p id="voice-help" class="field-help">Choose before connecting. Your voice stays fixed for this session.</p>
@@ -46,6 +83,7 @@
         <button id="start" class="button button-start"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4m-3 0h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Start Conversation</button>
         <button id="stop" class="button button-stop" disabled><span class="stop-icon" aria-hidden="true"></span>End Conversation</button>
       </div>
+      <details id="outcome-panel"><summary>Fictional collection outcome</summary><pre id="collection-result" aria-live="polite">No collection outcome yet. Reports are not payments or bank approvals.</pre></details>
       <div class="playback"><label for="speaker">Assistant playback</label><audio id="speaker" autoplay controls aria-label="Assistant audio playback"></audio><p id="playback-help">Use headphones. If playback is blocked, press Play above.</p></div>
     </section>
     <aside class="privacy-note" aria-label="Privacy and AI disclosure"><span class="privacy-icon" aria-hidden="true">i</span><div><strong>You’re speaking with an AI assistant.</strong><p>This local demo cannot verify your identity or access loan details. Do not share account numbers, OTPs, PINs or other sensitive information. Say “band karo” or press End Conversation to stop.</p></div></aside>

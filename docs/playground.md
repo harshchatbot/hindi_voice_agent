@@ -7,43 +7,28 @@ were added.
 
 ## Voice selection and server configuration
 
-The dropdown defaults to **Sarvam Bulbul V3 — Shubh** and also offers
-**Google Chirp 3 HD — Achird**. The offer body contains `sdp`, `type` and only
-the allowlisted `voice_provider` selector (`sarvam` or `google`). Omitting the
-selector defaults to Sarvam. Unknown selectors and extra fields (including
-model IDs, voice IDs and credentials) receive a sanitized HTTP 422 before
-opening a connection. Missing selected-provider configuration yields a safe
-HTTP 503 rather than switching providers.
+The TTS dropdown defaults to **Sarvam Bulbul V3 — Shubh**, with optional
+**Google Chirp 3 HD — Achird** and experimental **Bulbul V4 Flash — Shubh Hindi**.
+The LLM dropdown defaults to **GPT-4.1 Mini**, with experimental
+**Sarvam 105B Conversations**. Both controls lock while connecting/connected.
 
-These optional server-side settings define the presets:
+The offer body accepts only `sdp`, `type`, `voice_provider` (`sarvam`, `google`,
+`sarvam-v4-flash`) and `llm_provider` (`openai`, `sarvam`). Missing selectors use
+the original defaults. Unknown selectors and extra fields, including client model,
+voice or credential fields, return sanitized HTTP 422 before opening a peer.
+Missing selected-provider credentials yield safe HTTP 503; there is no fallback.
 
-| Environment variable | Default |
-| --- | --- |
-| `TECHFI_PLAYGROUND_SARVAM_MODEL` | `bulbul:v3` |
-| `TECHFI_PLAYGROUND_SARVAM_VOICE_ID` | `shubh` |
-| `TECHFI_PLAYGROUND_GOOGLE_MODEL` | `chirp3-hd` |
-| `TECHFI_PLAYGROUND_GOOGLE_VOICE_ID` | `hi-IN-Chirp3-HD-Achird` |
-
-The browser always uses these named presets rather than the process-wide
-`TECHFI_TTS_PROVIDER`/model/voice selection. Keep existing process settings valid
-for worker startup; the underlying configurable provider factory remains usable
-independently. If customizing a preset voice, update its static human-readable
-dropdown label to match. This is intentionally a two-choice local playground,
-not a dynamic provider catalogue.
-
-Each offer receives a newly validated settings object. STT, LLM, language,
-prompt, VAD thresholds, watchdogs and latency configuration are preserved.
-The configured TTS role key is retained only for its original provider;
-switching to Sarvam uses `SARVAM_API_KEY`. Google uses ADC or the securely
-configured credentials-file path. Keys and paths are never returned to the
-browser. Selection is locked while connecting/connected and restored on End,
-failure or disconnect. No active-call provider switching or automatic fallback
-is implemented.
+Server-owned presets and secure key routing are documented in
+[experimental provider configuration](sarvam-experimental.md). Each offer receives
+a validated settings snapshot; STT, prompt, language, VAD, watchdogs and timing
+remain unchanged. Choices apply only to new sessions. No active-call switching,
+automatic fallback, dynamic voice catalogue or browser secrets are introduced.
+Update the static display label if changing a server preset voice.
 
 ## Startup
 
 Preserve the existing ignored `.env`; do not overwrite configured credentials.
-For both choices, install the optional Google dependencies:
+For the Google option, install the optional Google dependencies:
 
 ```sh
 uv sync --frozen --all-packages --extra google --group dev
@@ -71,18 +56,18 @@ The following live conversation steps can incur provider charges and **were not
 executed during this change**. Use synthetic identities and headphones.
 
 1. At desktop and narrow/mobile widths, confirm the page fits without horizontal
-   scrolling. Use keyboard Tab/Shift-Tab to reach the labeled selector, Start,
+   scrolling. Use keyboard Tab/Shift-Tab to reach both labeled selectors, Start,
    End and playback control. Focus should be visible. Check the OS reduced-motion
    setting and screen-reader status announcements.
-2. On first load, confirm **Ready**, Sarvam selected, and no microphone prompt.
-   Select a voice and press **Start Conversation**: status becomes **Connecting**
-   and the selector is disabled. Deny permission to check **Error** and recovery.
+2. On first load, confirm **Ready**, GPT-4.1 Mini and Bulbul v3 selected, and no microphone prompt.
+   Select a model and voice and press **Start Conversation**: status becomes **Connecting**
+   and both selectors are disabled. Deny permission to check **Error** and recovery.
 3. Start again and allow the microphone. Confirm **Connected**, AI disclosure,
    Hindi/Hinglish input/output, local microphone and assistant activity, and
    unchanged interruption/opt-out behavior. If autoplay is blocked, press Play
    on the provided audio control. Activity meters do not prove audible playback.
 4. Press **End Conversation**. Confirm **Disconnected**, the browser microphone
-   indicator ends, meters reset, playback clears and the selector unlocks. Also
+   indicator ends, meters reset, playback clears and both selectors unlock. Also
    end while the permission prompt or connection is pending; late permission
    completion must not start another session.
 5. Choose Google and start a fresh session. Verify the configured Achird output,
@@ -125,3 +110,13 @@ integration test deselected; **4 mocked Node tests passed**; Ruff lint/format
 and both JavaScript syntax checks passed. Eight Python warning occurrences
 originate upstream. No paid provider calls, live sessions or visual browser
 acceptance checks were run.
+
+
+For the new experimental combinations, follow the additional acceptance steps
+in [the Sarvam experimental guide](sarvam-experimental.md). Earlier validation
+counts above describe the original playground milestone, not the expanded suite.
+
+The [Soft Collection demo](soft-collection.md) adds Agent Type, grammatical persona,
+validated fictional case fields and a temporary structured-outcome panel. Its
+server-owned policy defaults disabled; all configuration locks per session.
+The provider choices now also resolve approved male/female server voice presets.

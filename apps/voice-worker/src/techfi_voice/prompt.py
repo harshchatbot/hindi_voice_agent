@@ -23,3 +23,16 @@ SAFETY_RULES = """Mandatory conversation rules:
 
 def conversational_prompt(style: str) -> str:
     return f"{style}\n\n{SAFETY_RULES}"
+
+
+def agent_prompt(settings):
+    if settings.agent_type == "soft-collection":
+        from techfi_voice.collection import collection_system_prompt
+
+        return collection_system_prompt(settings.assistant_name, settings.persona)
+    if settings.persona == "male":
+        return conversational_prompt(settings.system_prompt)
+    return (
+        conversational_prompt(settings.system_prompt)
+        + "\nUse rahi hoon / sakti hoon for self-reference."
+    )

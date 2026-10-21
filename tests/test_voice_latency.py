@@ -75,7 +75,11 @@ def test_monotonic_stages_last_transcript_deduplication_and_no_payloads(monkeypa
         await observer.cleanup()
 
     asyncio.run(run())
-    records = [json.loads(line) for line in stream.getvalue().splitlines()]
+    records = [
+        row
+        for line in stream.getvalue().splitlines()
+        if (row := json.loads(line))["event"] == "voice_latency"
+    ]
     assert {row["metric"]: row["duration_ms"] for row in records} == {
         "stt_completion_ms": 700,
         "llm_first_token_ms": 200,
@@ -122,7 +126,9 @@ def test_interruption_and_next_session_do_not_inherit_old_timings(monkeypatch):
         assert two.turn_index == 0
 
     asyncio.run(run())
-    assert stream.getvalue() == ""
+    assert all(
+        json.loads(line)["event"] != "voice_latency" for line in stream.getvalue().splitlines()
+    )
 
 
 @pytest.mark.parametrize("duration", [-1, float("nan"), float("inf"), "private"])

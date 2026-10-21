@@ -25,18 +25,33 @@ async def run_session(session: VoiceSession, settings: VoiceSettings, runner=Non
         opt_out_task = asyncio.create_task(session.opt_out_requested.wait())
         tasks.extend([run_task, stop_task, opt_out_task])
         logger.info(Event.WORKER_STARTED, extra={"session_id": session.scope.session_id})
-        deadline = asyncio.get_running_loop().time() + settings.max_session_seconds
+        duration = settings.max_session_seconds
+        if session.calling_window_remaining:
+            # Re-evaluate after connection/setup: an earlier admission deadline can be stale.
+            duration = min(duration, session.calling_window_remaining())
+        deadline = asyncio.get_running_loop().time() + duration
         opt_out_deadline_set = False
         while True:
+            if session.calling_window_remaining:
+                deadline = min(
+                    deadline, asyncio.get_running_loop().time() + session.calling_window_remaining()
+                )
             remaining = max(0, deadline - asyncio.get_running_loop().time())
             watched = [run_task, stop_task]
             if not opt_out_deadline_set:
                 watched.append(opt_out_task)
             done, _ = await asyncio.wait(
-                watched, timeout=remaining, return_when=asyncio.FIRST_COMPLETED
+                watched,
+                timeout=min(remaining, 1) if session.calling_window_remaining else remaining,
+                return_when=asyncio.FIRST_COMPLETED,
             )
             if not done:
-                if not session.opted_out:
+                if (
+                    session.calling_window_remaining
+                    and asyncio.get_running_loop().time() < deadline
+                ):
+                    continue
+                if not (session.opted_out or session.closing):
                     session.outcome = CallOutcome.TIMED_OUT
                 break
             if run_task in done:
@@ -85,6 +100,8 @@ async def run_session(session: VoiceSession, settings: VoiceSettings, runner=Non
         if session.monitor:
             await session.monitor.cleanup()
         session.context.set_messages([])
+        if session.collection:
+            session.collection.cancel_pending()
         logger.info(
             Event.WORKER_FAILED if session.failed else Event.WORKER_COMPLETED,
             extra={"session_id": session.scope.session_id},

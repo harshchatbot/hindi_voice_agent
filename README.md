@@ -1,6 +1,6 @@
 # TechFi Labs Voice Platform
 
-A modular monolith with an independently deployable FastAPI control plane and a Pipecat voice worker. Milestone 2 adds a minimal local browser voice client using OpenAI Whisper STT → OpenAI streamed LLM → Sarvam streaming TTS. Whisper conversations have been manually tested by the project owner; the new Sarvam Realtime path has only offline validation. Google Chirp 3 HD is an optional TTS alternative; see the [Google setup and switching guide](docs/google-tts.md). No telephony, campaigns, databases, broker or full frontend is implemented.
+A modular monolith with an independently deployable FastAPI control plane and a Pipecat voice worker. Milestone 2 adds a minimal local browser voice client using Sarvam Realtime STT → OpenAI streamed LLM → Sarvam streaming TTS, with Whisper as a selectable fallback. Whisper conversations have been manually tested by the project owner; the new Sarvam Realtime path has only offline validation. Google Chirp 3 HD is an optional TTS alternative; see the [Google setup and switching guide](docs/google-tts.md). No telephony, campaigns, databases, broker or full frontend is implemented.
 
 ## Structure
 
@@ -33,12 +33,12 @@ Set these required variables in `.env`:
 | `OPENAI_API_KEY` | Your existing OpenAI key; never sent to the browser |
 | `SARVAM_API_KEY` | Sarvam key used for TTS (also used by the optional Sarvam STT adapter) |
 | `TECHFI_TENANT_ID` | Internal random UUID; never a customer identifier |
-| `TECHFI_STT_MODEL` | `whisper-1` for the default OpenAI STT adapter |
+| `TECHFI_STT_MODEL` | `saaras:v4` (default); `whisper-1` when selecting OpenAI STT |
 | `TECHFI_LLM_MODEL` | An approved streaming Chat Completions model available to your OpenAI project |
 | `TECHFI_TTS_MODEL` | `bulbul:v3` for Sarvam (default); `chirp3-hd` for optional Google |
 | `TECHFI_TTS_VOICE_ID` | A supported v3 speaker, for example `shubh`; Google example: `hi-IN-Chirp3-HD-Achird` |
 
-A new internal UUID can be generated with `uv run --no-sync python -c 'from uuid import uuid4; print(uuid4())'`. Provider names default to `openai`, `openai`, `sarvam`; language defaults to `hi-IN`. Credentials use Pydantic `SecretStr`, are not included in logs, and are unwrapped only at SDK construction. Explicit `TECHFI_STT_API_KEY`, `TECHFI_LLM_API_KEY`, and `TECHFI_TTS_API_KEY` override conventional keys. A conventional key is used only for its matching provider. Google TTS uses ADC instead of a role API key; optionally set `GOOGLE_APPLICATION_CREDENTIALS` to an externally stored credential-file path. That path is loaded by Pydantic, excluded from serialization, and never logged. Other providers require their own role key. Environment variables override `.env` within Pydantic Settings source precedence.
+A new internal UUID can be generated with `uv run --no-sync python -c 'from uuid import uuid4; print(uuid4())'`. Provider names default to `sarvam-realtime`, `openai`, `sarvam`; language defaults to `hi-IN`. Credentials use Pydantic `SecretStr`, are not included in logs, and are unwrapped only at SDK construction. Explicit `TECHFI_STT_API_KEY`, `TECHFI_LLM_API_KEY`, and `TECHFI_TTS_API_KEY` override conventional keys. A conventional key is used only for its matching provider. Google TTS uses ADC instead of a role API key; optionally set `GOOGLE_APPLICATION_CREDENTIALS` to an externally stored credential-file path. That path is loaded by Pydantic, excluded from serialization, and never logged. Other providers require their own role key. Environment variables override `.env` within Pydantic Settings source precedence.
 
 Start the browser worker:
 
@@ -46,7 +46,7 @@ Start the browser worker:
 uv run --no-sync techfi-voice
 ```
 
-Open **[http://127.0.0.1:7860](http://127.0.0.1:7860)** manually. Use a current Chromium browser, headphones and OS/browser microphone permission. In the **TechFi Labs — Voice AI Playground**, choose **Sarvam Bulbul V3 — Shubh** (default) or **Google Chirp 3 HD — Achird**, then press **Start Conversation**; the microphone is requested only then. Voice selection stays locked until the session ends. The assistant should speak its AI disclosure, followed by Hindi/Hinglish conversation. Press **End Conversation**, say **“band karo”**, or close the page to end. Audio controls let you enable playback if browser autoplay is blocked. No Node build, PortAudio, external CDN or frontend dev server is required. The browser sends only an allowlisted provider selector; model/voice presets and credentials remain on the server. See [playground setup and manual acceptance steps](docs/playground.md) for per-provider setup, local activity meters and validation limits. Server startup never prints credentials or provider payloads. Production (the default) emits only a sanitized `worker_failed` event on failure. Set `TECHFI_ENVIRONMENT=development` in your local environment or `.env` to add startup stack locations and safe validation details. Development traces omit configuration values, frame locals, source lines and arbitrary exception messages. Missing configuration is still an error; provider/model/voice and tenant settings are not silently inferred.
+Open **[http://127.0.0.1:7860](http://127.0.0.1:7860)** manually. Use a current Chromium browser, headphones and OS/browser microphone permission. In the **TechFi Labs — Voice AI Playground**, choose **Sarvam Bulbul V3 — Shubh** (default) or **Google Chirp 3 HD — Achird**, then press **Start Conversation**; the microphone is requested only then. Voice selection stays locked until the session ends. The assistant should speak its AI disclosure, followed by Hindi/Hinglish conversation. Press **End Conversation**, say **“band karo”**, or close the page to end. Audio controls let you enable playback if browser autoplay is blocked. No Node build, PortAudio, external CDN or frontend dev server is required. The browser sends only an allowlisted provider selector; model/voice presets and credentials remain on the server. See [playground setup and manual acceptance steps](docs/playground.md) for per-provider setup, local activity meters and validation limits. Server startup never prints credentials or provider payloads. Production (the default) emits only a sanitized `worker_failed` event on failure. Set `TECHFI_ENVIRONMENT=development` in your local environment or `.env` to add startup stack locations and safe validation details. Development traces omit configuration values, frame locals, source lines and arbitrary exception messages. Tenant scope and credentials remain required. Model defaults are `saaras:v4`, `gpt-4.1-mini`, and `bulbul:v3` with `shubh`; provider changes require matching model/voice configuration.
 
 An offline preflight validates the same settings and constructs the application without starting a listener or creating provider clients:
 
@@ -88,6 +88,7 @@ All settings are read from `TECHFI_` environment variables / `.env` unless expli
 | `TTS_PROVIDER` | `sarvam` (default); also `google`, `cartesia`. Change model and voice together when switching. |
 | `LANGUAGE` | `hi-IN`; also `hi`, `en-IN`, `en`. There is no artificial `hinglish` language code. |
 | `STT_STREAM_TYPE` | `balanced`; also `fast`, for `sarvam-realtime` only |
+| `STT_FINAL_TIMEOUT_SECONDS` | 5; realtime final-transcript fence; 0.5–30 |
 | `STT_KEEPALIVE_SECONDS` | 10, bounded to 1–60; realtime WebSocket keepalive |
 | `STT_MODE` | `transcribe`; also `codemix`, `verbatim`, `translit` |
 | `HOST`, `PORT` | `127.0.0.1`, `7860`; only `localhost` or `127.0.0.1` binding is accepted |
@@ -100,12 +101,12 @@ All settings are read from `TECHFI_` environment variables / `.env` unless expli
 | `OPT_OUT_GRACE_SECONDS` | 8 maximum to speak the closing response |
 | `VAD_CONFIDENCE` | 0.7 |
 | `VAD_START_SECONDS`, `VAD_STOP_SECONDS` | 0.2, 0.4 |
-| `TURN_SILENCE_SECONDS` | 0.6; also waits for STT finalization/latency metadata |
+| `TURN_SILENCE_SECONDS` | 0.6 after VAD stop; overlaps STT finalization. Configurable from 0–3; see the latency guide before tuning |
 | `SYSTEM_PROMPT` | Polite loan-payment reminder style in Hindi/Hinglish |
 | `GREETING`, `OPT_OUT_REPLY` | AI disclosure / respectful closing, configurable as approved text |
 | `OPT_OUT_PHRASES` | JSON array; defaults include English, romanized Hindi and Devanagari requests |
 
-Use the full names, e.g. `TECHFI_PROVIDER_TIMEOUT_SECONDS`, in `.env`. Hinglish recognition quality and voice quality depend on the chosen providers/models and still need a live evaluation. The local Silero VAD and Pipecat speech-timeout turn strategies drive endpointing. Whisper `whisper-1` uses Pipecat's supported OpenAISTTService to transcribe VAD-delimited utterances over HTTP; it is not a streaming STT WebSocket. The browser audio transport remains WebRTC. For Saaras V4 realtime streaming, select `sarvam-realtime`; see the [realtime STT setup and manual switching guide](docs/sarvam-realtime-stt.md). The default remains Whisper. When selecting the older `sarvam` streaming STT adapter, set its model to `saaras:v3` or `saaras:v4`; Sarvam server VAD is disabled to avoid competing turn detection. Pipecat broadcasts interruptions when local speech starts; TTS/output queues and LLM generation receive interruption frames. The monitor clears stale watchdogs on interruption. OpenAI LLM retries are disabled, HTTP reads are bounded, and both OpenAI clients close during cleanup.
+Use the full names, e.g. `TECHFI_PROVIDER_TIMEOUT_SECONDS`, in `.env`. Hinglish recognition quality and voice quality depend on the chosen providers/models and still need a live evaluation. The local Silero VAD and Pipecat speech-timeout turn strategies drive endpointing. Whisper `whisper-1` uses Pipecat's supported OpenAISTTService to transcribe VAD-delimited utterances over HTTP; it is not a streaming STT WebSocket. The browser audio transport remains WebRTC. For Saaras V4 realtime streaming, select `sarvam-realtime`; see the [realtime STT setup and manual switching guide](docs/sarvam-realtime-stt.md). Sarvam Realtime is now the default; Whisper remains selectable. When selecting the older `sarvam` streaming STT adapter, set its model to `saaras:v3` or `saaras:v4`; Sarvam server VAD is disabled to avoid competing turn detection. Pipecat broadcasts interruptions when local speech starts; TTS/output queues and LLM generation receive interruption frames. The monitor clears stale watchdogs on interruption. OpenAI LLM retries are disabled, HTTP reads are bounded, and both OpenAI clients close during cleanup.
 
 The default prompt is in `techfi_voice/prompt.py`. It is supplied through the LLM service’s supported `system_instruction` setting; session history starts empty. `TECHFI_SYSTEM_PROMPT` controls conversational style; mandatory disclosure, identity, privacy and opt-out instructions are appended. The greeting discloses AI status before any loan discussion. **No identity verifier or customer/loan data source exists:** identity stays unverified, and the assistant must direct requests for details to the lender's official verification channel. It must not infer or invent balances, due dates or even the existence of a loan. A spoken name or “yes” does not grant access. This is a reminder conversation demo, not a verified account service or payment collector.
 
@@ -151,4 +152,25 @@ uv run --no-sync pytest -q -m integration tests/test_webrtc_signaling.py
 
 See [milestone 2 validation](docs/validation-milestone2.md), [startup fix validation](docs/startup-investigation.md), and [architecture decisions](docs/adr). Synthetic tests do not establish that credentials, streaming recognition, spoken output, barge-in or Hindi/Hinglish quality work live.
 
-Logs contain approved event names only; unknown messages, exception text and extras are suppressed. Default Pipecat/SDK logging sinks and HTTP access logs are disabled. No raw error payloads or transcripts are returned to the browser. Audio is not recorded; browser/client code logs no SDP or conversations. Native provider/usage metrics, tracing and RTVI transcript forwarding remain disabled. Content-free monotonic latency events are enabled; see [latency definitions and bottleneck guide](docs/latency.md). Provider processing still sends audio/text off-machine: review retention/residency contracts and secret management before using any customer data. These controls do not constitute banking or loan-recovery compliance.
+Logs contain approved event names only; unknown messages, exception text and extras are suppressed. Default Pipecat/SDK logging sinks and HTTP access logs are disabled. No raw error payloads or transcripts are returned to the browser. Audio is not recorded; browser/client code logs no SDP or conversations. Native provider/usage metrics, tracing and RTVI transcript forwarding remain disabled. Content-free monotonic latency events are enabled; see [latency definitions and bottleneck guide](docs/latency.md). Startup/preflight and session logs now identify fixed allowlisted stack profiles; see the [live trace investigation](docs/stt-live-review-2026-10-19.md) before comparing provider latency. Provider processing still sends audio/text off-machine: review retention/residency contracts and secret management before using any customer data. These controls do not constitute banking or loan-recovery compliance.
+
+
+Experimental Sarvam LLM and v4 TTS options are available in the same playground;
+see [compatibility, configuration and manual evaluation](docs/sarvam-experimental.md).
+GPT-4.1 Mini and Bulbul v3/Shubh remain the dropdown defaults. The server accepts
+only provider selectors, resolves models/voices from trusted settings, and freezes
+both choices for each new session. STT configuration is preserved: use
+`sarvam-realtime` / `saaras:v4` for these experiments. No LiveKit or dependencies
+were added. The experimental combinations have **offline validation only**.
+
+The playground also includes an optional **Soft Collection Agent** with fictional
+case fields, male/female personas, application-enforced disclosure/state transitions
+and structured local outcomes. It is disabled until explicitly enabled by the
+server operator and observes the configured India calling window and conservative
+process-local retry/suppression policy. **Real identity verification and real bank
+collection remain unsupported.** See [configuration, limitations and manual test
+plan](docs/soft-collection.md). No provider calls were made to validate this use case.
+
+For any-hour fictional testing without browser/WebRTC, see the separate
+[macOS native collection simulation runner](docs/native-collection-simulation.md).
+It uses fixed fictional fixtures and does not change normal collection admission.
